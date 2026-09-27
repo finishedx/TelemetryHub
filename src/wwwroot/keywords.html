@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>关键词设置 - TelegramMonitor</title>
+  <link rel="stylesheet" href="/assets/panel.css?v=2" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">TelegramMonitor</div>
+      <nav class="nav">
+        <a class="nav-link" data-page="accounts" href="/dashboard.html">账号管理</a>
+        <a class="nav-link" data-page="messages" href="/messages.html">消息查询</a>
+        <a class="nav-link" data-page="keywords" href="/keywords.html">关键词设置</a>
+        <a class="nav-link" data-page="blacklist" href="/blacklist.html">黑名单</a>
+        <a class="nav-link" data-page="bot" href="/bot.html">Bot 通知</a>
+      </nav>
+      <div class="toolbar">
+        <span id="currentUser" class="muted small"></span>
+        <button id="btnLogout" class="btn danger small">退出登录</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h2>关键词设置</h2>
+      <p>关键词规则独立页面。先选择账号，再维护对应规则。</p>
+
+      <div class="row two">
+        <div class="field">
+          <label for="accountId">规则所属账号</label>
+          <select id="accountId"></select>
+        </div>
+        <div class="field">
+          <label for="ruleName">规则名称</label>
+          <input id="ruleName" placeholder="例如：监听红包消息" />
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="keywordValue">关键词内容</label>
+        <textarea id="keywordValue" placeholder="支持按匹配方式输入：普通文本、正则，或模糊关键词（?分隔）"></textarea>
+      </div>
+
+      <div class="row three">
+        <div class="field">
+          <label for="matchMode">匹配方式</label>
+          <select id="matchMode">
+            <option value="Exact">全部匹配</option>
+            <option value="Contains" selected>包含匹配</option>
+            <option value="Regex">正则匹配</option>
+            <option value="Fuzzy">模糊匹配多个关键词(以?分隔)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="keywordAction">命中动作</label>
+          <select id="keywordAction">
+            <option value="Monitor" selected>监控</option>
+            <option value="Exclude">排除</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="priority">优先级</label>
+          <input id="priority" type="number" value="0" />
+        </div>
+      </div>
+
+      <div class="checks">
+        <label><input id="isMatchUser" type="checkbox" />匹配特定用户</label>
+        <label><input id="isCaseSensitive" type="checkbox" />区分大小写</label>
+        <label><input id="isEnabled" type="checkbox" checked />启用</label>
+      </div>
+
+      <div class="field">
+        <label for="userValue">用户匹配（仅在勾选“匹配特定用户”时生效）</label>
+        <input id="userValue" placeholder="多个值可用英文逗号分隔，例如 user1,user2,123456" />
+      </div>
+
+      <div class="field">
+        <label for="remark">备注</label>
+        <input id="remark" placeholder="可选" />
+      </div>
+
+      <div class="toolbar">
+        <button id="btnSave" class="btn">新增规则</button>
+        <button id="btnReset" class="btn ghost">清空表单</button>
+        <button id="btnRefresh" class="btn ghost">刷新列表</button>
+        <span id="editHint" class="muted small">当前模式：新增</span>
+      </div>
+      <div id="keywordStatus" class="status"></div>
+    </section>
+
+    <section class="card" style="margin-top:12px;">
+      <div class="meta-row">
+        <h2 style="margin:0;">关键词规则列表</h2>
+        <span id="keywordsCount" class="muted small">0 条</span>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>规则名</th>
+              <th>关键词正则</th>
+              <th>匹配方式</th>
+              <th>匹配用户</th>
+              <th>用户规则</th>
+              <th>动作</th>
+              <th>启用</th>
+              <th>优先级</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="keywordsTbody">
+            <tr><td colspan="10">暂无数据</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/assets/common.js?v=2"></script>
+  <script>
+    const accountId = document.getElementById("accountId");
+    const ruleName = document.getElementById("ruleName");
+    const keywordValue = document.getElementById("keywordValue");
+    const matchMode = document.getElementById("matchMode");
+    const isMatchUser = document.getElementById("isMatchUser");
+    const userValue = document.getElementById("userValue");
+    const keywordAction = document.getElementById("keywordAction");
+    const isCaseSensitive = document.getElementById("isCaseSensitive");
+    const isEnabled = document.getElementById("isEnabled");
+    const priority = document.getElementById("priority");
+    const remark = document.getElementById("remark");
+    const keywordsTbody = document.getElementById("keywordsTbody");
+    const keywordsCount = document.getElementById("keywordsCount");
+    const editHint = document.getElementById("editHint");
+    const keywordStatus = document.getElementById("keywordStatus");
+
+    let keywordRows = [];
+    let editId = 0;
+
+    function normalizeMatchMode(value) {
+      if (typeof value === "string" && value) return value;
+      const map = { 0: "Exact", 1: "Contains", 2: "Regex", 3: "Fuzzy" };
+      return map[value] || "Contains";
+    }
+
+    function normalizeKeywordAction(value) {
+      if (typeof value === "string" && value) return value;
+      const map = { 0: "Exclude", 1: "Monitor" };
+      return map[value] || "Monitor";
+    }
+
+    function unescapeRegexText(value) {
+      return String(value || "").replace(/\\(.)/g, "$1");
+    }
+
+    function splitUnescaped(text, separator) {
+      const result = [];
+      let buffer = "";
+      let escaped = false;
+
+      for (const ch of text) {
+        if (escaped) {
+          buffer += ch;
+          escaped = false;
+          continue;
+        }
+        if (ch === "\\") {
+          buffer += ch;
+          escaped = true;
+          continue;
+        }
+        if (ch === separator) {
+          result.push(buffer);
+          buffer = "";
+          continue;
+        }
+        buffer += ch;
+      }
+
+      result.push(buffer);
+      return result;
+    }
+
+    function decodeKeywordValue(pattern, mode) {
+      const source = tm.asText(pattern, "");
+      const matchedMode = normalizeMatchMode(mode);
+      if (!source) return "";
+
+      if (matchedMode === "Exact") {
+        const match = source.match(/^\^(.*)\$$/);
+        return match ? unescapeRegexText(match[1]) : source;
+      }
+
+      if (matchedMode === "Contains") return unescapeRegexText(source);
+
+      if (matchedMode === "Fuzzy") {
+        const tokenRegex = /\(\?=\.\*(.+?)\)/g;
+        const tokens = [];
+        let token = tokenRegex.exec(source);
+        while (token) {
+          tokens.push(unescapeRegexText(token[1]));
+          token = tokenRegex.exec(source);
+        }
+        if (tokens.length > 0) return tokens.join("?");
+      }
+
+      return source;
+    }
+
+    function decodeUserValue(pattern) {
+      const source = tm.asText(pattern, "");
+      if (!source) return "";
+
+      const match = source.match(/^\^\(\?:([\s\S]+)\)\$$/);
+      if (!match) return source;
+
+      const tokens = splitUnescaped(match[1], "|")
+        .map(unescapeRegexText)
+        .filter(Boolean);
+      return tokens.join(",");
+    }
+
+    function currentAccountId() {
+      const value = accountId.value.trim();
+      if (!value) return null;
+      const id = Number(value);
+      return Number.isFinite(id) && id > 0 ? id : null;
+    }
+
+    function clearForm() {
+      editId = 0;
+      ruleName.value = "";
+      keywordValue.value = "";
+      matchMode.value = "Contains";
+      isMatchUser.checked = false;
+      userValue.value = "";
+      keywordAction.value = "Monitor";
+      isCaseSensitive.checked = false;
+      isEnabled.checked = true;
+      priority.value = "0";
+      remark.value = "";
+      editHint.textContent = "当前模式：新增";
+      userValue.disabled = true;
+    }
+
+    function findRuleById(id) {
+      return keywordRows.find(item => tm.toInt(tm.read(item, "id"), 0) === Number(id));
+    }
+
+    function fillForm(row) {
+      editId = tm.toInt(tm.read(row, "id"), 0);
+      ruleName.value = tm.asText(tm.read(row, "ruleName"), "");
+      const mode = normalizeMatchMode(tm.read(row, "matchMode"));
+      matchMode.value = mode;
+      keywordValue.value = decodeKeywordValue(tm.read(row, "keywordPattern"), mode);
+      isMatchUser.checked = !!tm.read(row, "isMatchUser");
+      userValue.value = decodeUserValue(tm.read(row, "userPattern"));
+      keywordAction.value = normalizeKeywordAction(tm.read(row, "keywordAction"));
+      isCaseSensitive.checked = !!tm.read(row, "isCaseSensitive");
+      isEnabled.checked = !!tm.read(row, "isEnabled");
+      priority.value = String(tm.toInt(tm.read(row, "priority"), 0));
+      remark.value = tm.asText(tm.read(row, "remark"), "");
+      editHint.textContent = `当前模式：编辑 ID ${editId}`;
+      userValue.disabled = !isMatchUser.checked;
+    }
+
+    function buildPayload() {
+      return {
+        id: editId,
+        accountId: currentAccountId(),
+        ruleName: ruleName.value.trim() || null,
+        keywordValue: keywordValue.value.trim(),
+        matchMode: matchMode.value,
+        isMatchUser: isMatchUser.checked,
+        userValue: isMatchUser.checked ? (userValue.value.trim() || null) : null,
+        keywordAction: keywordAction.value,
+        isCaseSensitive: isCaseSensitive.checked,
+        isEnabled: isEnabled.checked,
+        priority: Number(priority.value || 0),
+        remark: remark.value.trim() || null
+      };
+    }
+
+    function renderKeywordRows(rows) {
+      keywordRows = Array.isArray(rows) ? rows : [];
+      keywordsCount.textContent = keywordRows.length + " 条";
+
+      if (keywordRows.length === 0) {
+        keywordsTbody.innerHTML = "<tr><td colspan='10'>暂无数据</td></tr>";
+        return;
+      }
+
+      keywordsTbody.innerHTML = keywordRows.map(row => {
+        const id = tm.toInt(tm.read(row, "id"), 0);
+        return `
+          <tr>
+            <td>${tm.esc(id)}</td>
+            <td>${tm.esc(tm.asText(tm.read(row, "ruleName")))}</td>
+            <td title="${tm.esc(tm.asText(tm.read(row, "keywordPattern"), ""))}">${tm.esc(tm.shorten(tm.read(row, "keywordPattern"), 50) || "-")}</td>
+            <td>${tm.esc(normalizeMatchMode(tm.read(row, "matchMode")))}</td>
+            <td>${tm.esc(tm.yesNo(!!tm.read(row, "isMatchUser")))}</td>
+            <td title="${tm.esc(tm.asText(tm.read(row, "userPattern"), ""))}">${tm.esc(tm.shorten(tm.read(row, "userPattern"), 40) || "-")}</td>
+            <td>${tm.esc(normalizeKeywordAction(tm.read(row, "keywordAction")))}</td>
+            <td>${tm.esc(tm.yesNo(!!tm.read(row, "isEnabled")))}</td>
+            <td>${tm.esc(tm.toInt(tm.read(row, "priority"), 0))}</td>
+            <td>
+              <div class="cell-actions">
+                <button class="btn small ghost" data-action="edit" data-id="${id}">编辑</button>
+                <button class="btn small danger" data-action="delete" data-id="${id}">删除</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    async function loadKeywords() {
+      const params = new URLSearchParams();
+      const id = currentAccountId();
+      if (id) params.set("accountId", String(id));
+
+      const path = params.toString()
+        ? `/api/keywords?${params.toString()}`
+        : "/api/keywords";
+      const rows = await tm.request(path, { method: "GET" });
+      renderKeywordRows(rows);
+      return rows;
+    }
+
+    function renderAccountOptions(rows) {
+      const accountRows = Array.isArray(rows) ? rows : [];
+      const options = [
+        "<option value=''>全局规则</option>",
+        ...accountRows.map(row => {
+          const id = tm.toInt(tm.read(row, "id"), 0);
+          const phone = tm.asText(tm.read(row, "phone"), "-");
+          const username = tm.read(row, "username");
+          const label = username ? `${id} - ${phone} (@${username})` : `${id} - ${phone}`;
+          return `<option value="${id}">${tm.esc(label)}</option>`;
+        })
+      ];
+      accountId.innerHTML = options.join("");
+    }
+
+    isMatchUser.addEventListener("change", () => {
+      userValue.disabled = !isMatchUser.checked;
+      if (!isMatchUser.checked) userValue.value = "";
+    });
+
+    accountId.addEventListener("change", async () => {
+      clearForm();
+      try {
+        await loadKeywords();
+      } catch (error) {
+        tm.setStatus(keywordStatus, error instanceof Error ? error.message : "加载关键词失败", false);
+      }
+    });
+
+    document.getElementById("btnReset").addEventListener("click", () => {
+      clearForm();
+      tm.setStatus(keywordStatus, "已清空表单", true);
+    });
+
+    document.getElementById("btnRefresh").addEventListener("click", async () => {
+      try {
+        await loadKeywords();
+        tm.setStatus(keywordStatus, "列表已刷新", true);
+      } catch (error) {
+        tm.setStatus(keywordStatus, error instanceof Error ? error.message : "刷新失败", false);
+      }
+    });
+
+    document.getElementById("btnSave").addEventListener("click", async () => {
+      const payload = buildPayload();
+      if (!payload.keywordValue && !payload.isMatchUser) {
+        tm.setStatus(keywordStatus, "关键词内容不能为空", false);
+        return;
+      }
+      if (payload.isMatchUser && !payload.userValue) {
+        tm.setStatus(keywordStatus, "已开启匹配用户时，用户匹配内容不能为空", false);
+        return;
+      }
+
+      try {
+        if (editId > 0) {
+          await tm.request("/api/keywords", {
+            method: "PUT",
+            body: JSON.stringify(payload)
+          });
+          tm.setStatus(keywordStatus, "关键词规则更新成功", true);
+        } else {
+          await tm.request("/api/keywords", {
+            method: "POST",
+            body: JSON.stringify(payload)
+          });
+          tm.setStatus(keywordStatus, "关键词规则新增成功", true);
+        }
+
+        clearForm();
+        await loadKeywords();
+      } catch (error) {
+        tm.setStatus(keywordStatus, error instanceof Error ? error.message : "保存失败", false);
+      }
+    });
+
+    keywordsTbody.addEventListener("click", async event => {
+      const button = event.target.closest("button[data-action]");
+      if (!button) return;
+      const action = button.dataset.action;
+      const id = Number(button.dataset.id || 0);
+      const row = findRuleById(id);
+      if (!row) return;
+
+      if (action === "edit") {
+        fillForm(row);
+        tm.setStatus(keywordStatus, "规则已加载到表单，可继续编辑", true);
+        return;
+      }
+
+      if (action === "delete") {
+        if (!confirm(`确认删除关键词规则 ${id} 吗？`)) return;
+        try {
+          await tm.request(`/api/keywords/${id}`, { method: "DELETE" });
+          if (editId === id) clearForm();
+          tm.setStatus(keywordStatus, `已删除关键词规则 ${id}`, true);
+          await loadKeywords();
+        } catch (error) {
+          tm.setStatus(keywordStatus, error instanceof Error ? error.message : "删除失败", false);
+        }
+      }
+    });
+
+    (async function bootstrap() {
+      const profile = await tm.ensureAuth();
+      if (!profile) return;
+
+      tm.fillCurrentUser(profile);
+      tm.bindLogoutButton();
+      tm.setCurrentNav("keywords");
+      clearForm();
+
+      try {
+        const accounts = await tm.request("/api/accounts", { method: "GET" });
+        renderAccountOptions(accounts);
+        await loadKeywords();
+      } catch (error) {
+        tm.setStatus(keywordStatus, error instanceof Error ? error.message : "初始化失败", false);
+      }
+    })();
+  </script>
+</body>
+</html>

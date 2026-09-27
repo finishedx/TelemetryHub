@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/tests/">
+    <Project Path="tests/TelegramMonitor.Tests/TelegramMonitor.Tests.csproj" />
+  </Folder>
+  <Project Path="src/TelegramMonitor.csproj" />
+</Solution>
